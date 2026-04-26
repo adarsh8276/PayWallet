@@ -3,6 +3,7 @@ package com.example.service;
 import java.time.LocalDate;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -18,10 +19,14 @@ public class WalletServiceImpl implements WalletService {
     @Autowired
     private WalletRepository walletRepo;
 
+    @Value("${user.service.url}")
+    private String userServiceUrl;
+
     @Override
     public Wallet registerNewWallet(int userId) {
         Wallet existing = walletRepo.findByUserId(userId);
         if (existing != null) throw new RuntimeException("Wallet already exists for this user");
+
         boolean userChk = verifyUser(userId);
         if (userChk) {
             Wallet w = new Wallet();
@@ -50,7 +55,6 @@ public class WalletServiceImpl implements WalletService {
 
     @Override
     public Wallet addMoney(AddMoneyDto addMoneyDto) {
-        // Validate amount
         if (addMoneyDto.getAmt() <= 0) {
             throw new RuntimeException("Amount must be greater than 0");
         }
@@ -58,27 +62,30 @@ public class WalletServiceImpl implements WalletService {
             throw new RuntimeException("Cannot add more than ₹1,00,000 at once");
         }
 
-        // Get wallet
         Wallet wallet = walletRepo.findByUserId(addMoneyDto.getUserId());
         if (wallet == null) {
             throw new RuntimeException("Wallet not found for userId: " + addMoneyDto.getUserId());
         }
 
-        // Check wallet is active
         if (wallet.getStatus() != WalletStatus.ACTIVE) {
             throw new RuntimeException("Wallet is not active");
         }
 
-        // Add money
         wallet.setWalletBalance(wallet.getWalletBalance() + addMoneyDto.getAmt());
         wallet.setLastUpdated(LocalDate.now());
         return walletRepo.save(wallet);
     }
 
     boolean verifyUser(int userId) {
-        RestTemplate template = new RestTemplate();
-        String url = "http://localhost:9000/users/" + userId;
-        UserDto user = template.getForObject(url, UserDto.class);
-        return user != null;
+        try {
+            RestTemplate template = new RestTemplate();
+            // Use env-configured user service URL instead of hardcoded localhost
+            String url = userServiceUrl + "/users/" + userId;
+            UserDto user = template.getForObject(url, UserDto.class);
+            return user != null;
+        } catch (Exception e) {
+            // If user service is unreachable, fail safe
+            throw new RuntimeException("Could not verify user: " + e.getMessage());
+        }
     }
 }
