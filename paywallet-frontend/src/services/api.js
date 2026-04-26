@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API = axios.create({ baseURL: 'http://localhost:8080' });
+const API = axios.create({ baseURL: 'https://paywallet-gateway.onrender.com' });
 
 API.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
