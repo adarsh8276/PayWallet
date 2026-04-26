@@ -5,7 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Version;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -33,8 +32,4 @@ public class User {
 
     private String address;
     private String email;
-
-    // Prevents "Row was updated or deleted by another transaction" Hibernate error
-    @Version
-    private int version;
 }
