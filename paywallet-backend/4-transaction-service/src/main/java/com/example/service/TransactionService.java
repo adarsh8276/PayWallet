@@ -1,5 +1,17 @@
 package com.example.service;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
 import com.example.dto.TransactionDto;
 import com.example.dto.TransactionNotificationDto;
 import com.example.dto.UserDto;
@@ -7,16 +19,6 @@ import com.example.dto.WalletDto;
 import com.example.entity.Transaction;
 import com.example.repo.TransactionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
 
 @Service
 public class TransactionService {
@@ -35,37 +37,45 @@ public class TransactionService {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Value("${user.service.url}")
+    private String userServiceUrl;
+
+    @Value("${wallet.service.url}")
+    private String walletServiceUrl;
+
     public UserDto fundTransfer(TransactionDto transactionDto) {
         log.info("Fund transfer from {} to {}", transactionDto.getFromUserId(), transactionDto.getToUserId());
 
         // 1. Get sender details
-        String userUrl = "http://user-service/users/" + transactionDto.getFromUserId();
-        UserDto fromUser = restTemplate.getForObject(userUrl, UserDto.class);
+        UserDto fromUser = restTemplate.getForObject(userServiceUrl + "/users/" + transactionDto.getFromUserId(), UserDto.class);
+        if (fromUser == null) throw new RuntimeException("Sender not found");
 
         // 2. Get receiver details
-        String toUserUrl = "http://user-service/users/" + transactionDto.getToUserId();
-        UserDto toUser = restTemplate.getForObject(toUserUrl, UserDto.class);
+        UserDto toUser = restTemplate.getForObject(userServiceUrl + "/users/" + transactionDto.getToUserId(), UserDto.class);
+        if (toUser == null) throw new RuntimeException("Receiver not found");
 
         // 3. Get sender wallet
-        String fromWalletUrl = "http://3-wallet-service/wallet/user/" + transactionDto.getFromUserId();
-        WalletDto fromWallet = restTemplate.getForObject(fromWalletUrl, WalletDto.class);
+        WalletDto fromWallet = restTemplate.getForObject(walletServiceUrl + "/wallet/user/" + transactionDto.getFromUserId(), WalletDto.class);
 
         // 4. Get receiver wallet
-        String toWalletUrl = "http://3-wallet-service/wallet/user/" + transactionDto.getToUserId();
-        WalletDto toWallet = restTemplate.getForObject(toWalletUrl, WalletDto.class);
+        WalletDto toWallet = restTemplate.getForObject(walletServiceUrl + "/wallet/user/" + transactionDto.getToUserId(), WalletDto.class);
 
         // 5. Check balance
         if (fromWallet == null || fromWallet.getWalletBalance() < transactionDto.getAmtToTransfer()) {
             throw new RuntimeException("Insufficient balance");
         }
 
+        if (transactionDto.getFromUserId() == transactionDto.getToUserId()) {
+            throw new RuntimeException("Cannot transfer to yourself");
+        }
+
         // 6. Deduct from sender wallet
         fromWallet.setWalletBalance(fromWallet.getWalletBalance() - transactionDto.getAmtToTransfer());
-        restTemplate.put("http://3-wallet-service/wallet/update", fromWallet);
+        restTemplate.put(walletServiceUrl + "/wallet/update", fromWallet);
 
         // 7. Add to receiver wallet
         toWallet.setWalletBalance(toWallet.getWalletBalance() + transactionDto.getAmtToTransfer());
-        restTemplate.put("http://3-wallet-service/wallet/update", toWallet);
+        restTemplate.put(walletServiceUrl + "/wallet/update", toWallet);
 
         // 8. Save transaction in DB
         Transaction txn = new Transaction();
@@ -88,7 +98,7 @@ public class TransactionService {
             kafkaTemplate.send("TRANSFER_NOTIFICATION", json);
             log.info("Notification sent to Kafka");
         } catch (Exception e) {
-            log.error("Failed to send notification: {}", e.getMessage());
+            log.error("Failed to send Kafka notification (non-fatal): {}", e.getMessage());
         }
 
         return fromUser;
